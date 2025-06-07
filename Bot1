@@ -1,0 +1,106 @@
+ticket-bot/
+├── commands/
+│   └── ticket.js
+├── events/
+│   ├── interactionCreate.js
+│   └── ready.js
+├── index.js
+├── config.json
+├── package.json
+npm init -y
+npm install discord.js dotenv
+const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
+const fs = require('fs');
+const config = require('./config.json');
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers],
+  partials: [Partials.Channel]
+});
+
+client.commands = new Collection();
+
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+for (const file of commandFiles) {
+  const command = require(`./commands/${file}`);
+  client.commands.set(command.data.name, command);
+}
+
+const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
+for (const file of eventFiles) {
+  const event = require(`./events/${file}`);
+  if (event.once) {
+    client.once(event.name, (...args) => event.execute(...args, client));
+  } else {
+    client.on(event.name, (...args) => event.execute(...args, client));
+  }
+}
+
+client.login(config.token);
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+
+module.exports = {
+  data: new SlashCommandBuilder()
+    .setName('ticket')
+    .setDescription('يفتح تذكرة دعم'),
+
+  async execute(interaction) {
+    const row = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId('create_ticket')
+          .setLabel('🎟️ إنشاء تذكرة')
+          .setStyle(ButtonStyle.Primary)
+      );
+
+    await interaction.reply({ content: 'اضغط على الزر لإنشاء تذكرة.', components: [row], ephemeral: true });
+  }
+};
+const { ChannelType, PermissionFlagsBits } = require('discord.js');
+
+module.exports = {
+  name: 'interactionCreate',
+  async execute(interaction, client) {
+    if (interaction.isChatInputCommand()) {
+      const command = client.commands.get(interaction.commandName);
+      if (!command) return;
+      await command.execute(interaction);
+    }
+
+    if (interaction.isButton()) {
+      if (interaction.customId === 'create_ticket') {
+        const guild = interaction.guild;
+        const member = interaction.member;
+
+        const channel = await guild.channels.create({
+          name: `ticket-${member.user.username}`,
+          type: ChannelType.GuildText,
+          permissionOverwrites: [
+            {
+              id: guild.id,
+              deny: [PermissionFlagsBits.ViewChannel],
+            },
+            {
+              id: member.id,
+              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+            },
+            {
+              id: client.user.id,
+              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+            }
+          ]
+        });
+
+        await channel.send(`مرحباً ${member}, سيتم الرد عليك قريباً.`);
+        await interaction.reply({ content: `تم إنشاء التذكرة: ${channel}`, ephemeral: true });
+      }
+    }
+  }
+};
+module.exports = {
+  name: 'ready',
+  once: true,
+  execute(client) {
+    console.log(`تم تسجيل الدخول كـ ${client.user.tag}`);
+  }
+};
